@@ -1,5 +1,10 @@
+import json
+import os
+import sys
+import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 from yaml.nodes import MappingNode, ScalarNode, SequenceNode
@@ -48,6 +53,48 @@ class CloudFormationTests(unittest.TestCase):
             "create-bug-report",
             resources["BugReportFunction"]["Properties"]["FunctionName"],
         )
+
+    def test_deployed_inline_lambda_creates_open_ticket(self):
+        template = load_template("cloudformation-tool.yaml")
+        source = template["Resources"]["BugReportFunction"]["Properties"]["Code"]
+        source = source["ZipFile"]
+
+        class FakeTable:
+            def __init__(self):
+                self.items = []
+
+            def put_item(self, **kwargs):
+                self.items.append(kwargs["Item"])
+
+        table = FakeTable()
+        boto3_module = types.ModuleType("boto3")
+        boto3_module.resource = lambda service: types.SimpleNamespace(
+            Table=lambda name: table
+        )
+        namespace = {}
+        with patch.dict(sys.modules, {"boto3": boto3_module}), patch.dict(
+            os.environ, {"BUG_REPORT_TABLE": "BugReports"}
+        ):
+            exec(compile(source, "cloudformation-tool.yaml:ZipFile", "exec"), namespace)
+
+        response = namespace["lambda_handler"](
+            {
+                "messageVersion": "1.0",
+                "function": "create_bug_report",
+                "actionGroup": "bug-report-actions",
+                "parameters": [
+                    {"name": "description", "value": "Checkout freezes"},
+                    {"name": "environment", "value": "Chrome on macOS"},
+                ],
+            },
+            None,
+        )
+
+        payload = response["response"]["functionResponse"]["responseBody"]
+        payload = json.loads(payload["TEXT"]["body"])
+        self.assertEqual("OPEN", payload["status"])
+        self.assertEqual(1, len(table.items))
+        self.assertEqual("Checkout freezes", table.items[0]["description"])
 
     def test_flow_has_three_exact_route_conditions_and_outputs(self):
         template = load_template("cloudformation-solution.yaml")

@@ -141,7 +141,7 @@ Resources:
               - Sid: InvokeBugAgent
                 Effect: Allow
                 Action: bedrock:InvokeAgent
-                Resource: !GetAtt BugReportAgentAlias.Arn
+                Resource: !GetAtt BugReportAgentAlias.AgentAliasArn
 
   CustomerSupportFlow:
     Type: AWS::Bedrock::Flow
@@ -226,7 +226,7 @@ Resources:
             Type: Agent
             Configuration:
               Agent:
-                AgentAliasArn: !GetAtt BugReportAgentAlias.Arn
+                AgentAliasArn: !GetAtt BugReportAgentAlias.AgentAliasArn
             Inputs:
               - Name: agentInputText
                 Type: String
@@ -498,4 +498,4 @@ Outputs:
   BugReportAgentId:
     Value: !Ref BugReportAgent
   BugReportAgentAliasArn:
-    Value: !GetAtt BugReportAgentAlias.Arn
+    Value: !GetAtt BugReportAgentAlias.AgentAliasArn

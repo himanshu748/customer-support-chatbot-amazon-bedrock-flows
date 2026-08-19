@@ -161,7 +161,8 @@ Resources:
         Variables:
           BUG_REPORT_TABLE: !Ref BugReportTable
       Tags:
-        Project: CustomerSupportBedrockFlow
+        - Key: Project
+          Value: CustomerSupportBedrockFlow
 
 Outputs:
   BugReportFunctionArn:

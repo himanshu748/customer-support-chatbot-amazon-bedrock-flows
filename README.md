@@ -160,6 +160,11 @@ Add `--trace` to request Flow traces.
 These checks do not call AWS:
 
 ```bash
+pip install -r requirements-dev.txt
+cfn-lint -r us-east-1 -t \
+  cloudformation-tool.yaml \
+  cloudformation-solution.yaml \
+  cloudformation-testing.yaml
 python -m unittest discover -s tests -v
 python generate-eval-dataset.py --tests-json flow-tests.json --validate-only
 ```
