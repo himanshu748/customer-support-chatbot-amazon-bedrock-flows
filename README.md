@@ -49,6 +49,17 @@ The classifier is instructed to return one exact label. A bug report takes prece
 - Access to the selected Bedrock model, by default Amazon Nova Lite
 - Permissions to create CloudFormation, IAM, Lambda, DynamoDB, S3 and Bedrock resources
 
+> **[AWS availability notice (July 30, 2026)](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html):**
+> Amazon Bedrock Agents is now Agents Classic and is closed to new customers.
+> `AWS::Bedrock::Agent` and
+> `CreateAgent` work only in accounts with Bedrock Agents activity during the
+> previous 12 months. AWS provides no exception process for new accounts and
+> recommends AgentCore for new agent development. This project intentionally
+> retains Agents Classic because the Udacity rubric explicitly requires a
+> Bedrock Agent node. Use an allowlisted training account or ask the course
+> provider for an updated AgentCore rubric if `CreateAgent` returns the
+> maintenance-mode `AccessDeniedException`.
+
 Bedrock Agents Classic is available in `us-east-1`, `us-east-2` and `us-west-2`. This project standardises every command on `us-east-1`.
 
 ## 1. Install Python dependencies

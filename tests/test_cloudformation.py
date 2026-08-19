@@ -153,6 +153,66 @@ class CloudFormationTests(unittest.TestCase):
             conditional_targets,
         )
 
+    def test_bug_agent_has_lambda_action_group_and_collection_fields(self):
+        template = load_template("cloudformation-solution.yaml")
+        resources = template["Resources"]
+        agent = resources["BugReportAgent"]["Properties"]
+        groups = {group["ActionGroupName"]: group for group in agent["ActionGroups"]}
+
+        action_group = groups["bug-report-actions"]
+        self.assertEqual("ENABLED", action_group["ActionGroupState"])
+        self.assertEqual(
+            "BugReportFunctionArn", action_group["ActionGroupExecutor"]["Lambda"]
+        )
+        function = action_group["FunctionSchema"]["Functions"][0]
+        self.assertEqual("create_bug_report", function["Name"])
+        self.assertEqual(
+            {"description", "stepsToReproduce", "environment"},
+            set(function["Parameters"]),
+        )
+        self.assertTrue(function["Parameters"]["description"]["Required"])
+        self.assertFalse(function["Parameters"]["stepsToReproduce"]["Required"])
+        self.assertFalse(function["Parameters"]["environment"]["Required"])
+        self.assertEqual(
+            "AMAZON.UserInput",
+            groups["RequestMissingBugDetails"]["ParentActionGroupSignature"],
+        )
+
+    def test_classifier_and_faq_prompts_match_rubric_contract(self):
+        template = load_template("cloudformation-solution.yaml")
+        definition = template["Resources"]["CustomerSupportFlow"]["Properties"]
+        nodes = {node["Name"]: node for node in definition["Definition"]["Nodes"]}
+
+        classifier = nodes["ClassifyRequest"]["Configuration"]["Prompt"]
+        classifier = classifier["SourceConfiguration"]["Inline"]
+        classifier_text = classifier["TemplateConfiguration"]["Text"]["Text"]
+        self.assertIn("Output only BUG,", classifier_text)
+        self.assertIn("PLATFORM or OTHER", classifier_text)
+        self.assertEqual(0, classifier["InferenceConfiguration"]["Text"]["Temperature"])
+
+        faq = nodes["AnswerFAQ"]["Configuration"]["Prompt"]
+        faq_text = faq["SourceConfiguration"]["Inline"]["TemplateConfiguration"]
+        faq_text = faq_text["Text"]["Text"]
+        self.assertIn("FAQ:", faq_text)
+        self.assertIn("Track orders in Account > Orders > Track shipment", faq_text)
+        self.assertIn("${SupportPhone}", faq_text)
+
+        redirect = nodes["RedirectHuman"]["Configuration"]["Prompt"]
+        redirect_text = redirect["SourceConfiguration"]["Inline"]
+        redirect_text = redirect_text["TemplateConfiguration"]["Text"]["Text"]
+        self.assertIn("${SupportPhone}", redirect_text)
+
+    def test_flow_tests_cover_all_routes_and_uncovered_faq(self):
+        suite = json.loads((PROJECT_ROOT / "flow-tests.json").read_text(encoding="utf-8"))
+        cases = suite["tests"]
+        self.assertTrue({"bug", "platform", "other"}.issubset({case["category"] for case in cases}))
+        uncovered = next(
+            case for case in cases if case["id"] == "t7_platform_uncovered_gift_wrapping"
+        )
+        self.assertEqual("platform", uncovered["category"])
+        self.assertIn("does not provide", uncovered["expected"])
+        self.assertIn("+1-800-555-0147", uncovered["expected"])
+
 
 if __name__ == "__main__":
     unittest.main()
