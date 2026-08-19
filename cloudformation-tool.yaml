@@ -1,0 +1,173 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Customer support bug report Lambda function and DynamoDB table
+
+Resources:
+  BugReportTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: BugReports
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ticketId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ticketId
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: CustomerSupportBedrockFlow
+
+  BugReportFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: create-bug-report-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteBugReportsAndLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: WriteTickets
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt BugReportTable.Arn
+              - Sid: WriteLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*
+
+  BugReportFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: create-bug-report
+      Description: Creates validated customer support tickets for a Bedrock Agent
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import uuid
+          from datetime import datetime, timezone
+
+          import boto3
+
+          table = boto3.resource("dynamodb").Table(os.environ["BUG_REPORT_TABLE"])
+          supported_fields = ("description", "stepsToReproduce", "environment")
+          max_lengths = {
+              "description": 4000,
+              "stepsToReproduce": 4000,
+              "environment": 1000,
+          }
+
+          def response(event, body, state=None):
+              function_response = {
+                  "responseBody": {
+                      "TEXT": {
+                          "body": json.dumps(body, separators=(",", ":"))
+                      }
+                  }
+              }
+              if state:
+                  function_response["responseState"] = state
+              return {
+                  "messageVersion": "1.0",
+                  "response": {
+                      "actionGroup": event.get("actionGroup", "bug-report-actions"),
+                      "function": event.get("function", "create_bug_report"),
+                      "functionResponse": function_response,
+                  },
+                  "sessionAttributes": event.get("sessionAttributes", {}),
+                  "promptSessionAttributes": event.get("promptSessionAttributes", {}),
+              }
+
+          def lambda_handler(event, context):
+              if event.get("messageVersion") != "1.0":
+                  return response(event, {"error": "Unsupported message version"}, "FAILURE")
+              if event.get("function") != "create_bug_report":
+                  return response(event, {"error": "Unsupported function"}, "FAILURE")
+
+              parameters = {
+                  str(item.get("name", "")).strip(): str(item.get("value", "")).strip()
+                  for item in event.get("parameters", [])
+                  if item.get("name")
+              }
+              if not parameters.get("description"):
+                  return response(
+                      event,
+                      {"error": "Missing required field: description"},
+                      "REPROMPT",
+                  )
+              for field in supported_fields:
+                  if len(parameters.get(field, "")) > max_lengths[field]:
+                      return response(
+                          event,
+                          {"error": f"{field} must not exceed {max_lengths[field]} characters"},
+                          "REPROMPT",
+                      )
+
+              ticket_id = str(uuid.uuid4())
+              item = {
+                  "ticketId": ticket_id,
+                  "description": parameters["description"],
+                  "status": "OPEN",
+                  "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+              }
+              for field in ("stepsToReproduce", "environment"):
+                  if parameters.get(field):
+                      item[field] = parameters[field]
+              if event.get("sessionId"):
+                  item["sessionId"] = str(event["sessionId"])
+
+              try:
+                  table.put_item(
+                      Item=item,
+                      ConditionExpression="attribute_not_exists(ticketId)",
+                  )
+              except Exception:
+                  return response(
+                      event,
+                      {"error": "The ticket service is temporarily unavailable."},
+                      "FAILURE",
+                  )
+              return response(
+                  event,
+                  {
+                      "ticketId": ticket_id,
+                      "status": "OPEN",
+                      "message": "Bug report created successfully.",
+                  },
+              )
+      Handler: index.lambda_handler
+      Runtime: python3.13
+      Architectures:
+        - arm64
+      MemorySize: 256
+      Timeout: 10
+      Role: !GetAtt BugReportFunctionRole.Arn
+      Environment:
+        Variables:
+          BUG_REPORT_TABLE: !Ref BugReportTable
+      Tags:
+        Project: CustomerSupportBedrockFlow
+
+Outputs:
+  BugReportFunctionArn:
+    Description: Pass this value to the solution stack
+    Value: !GetAtt BugReportFunction.Arn
+  BugReportTableName:
+    Value: !Ref BugReportTable
+  BugReportTableArn:
+    Value: !GetAtt BugReportTable.Arn
