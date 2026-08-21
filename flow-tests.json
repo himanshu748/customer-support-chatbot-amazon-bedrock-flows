@@ -13,7 +13,7 @@
       "id": "t2_bug_report_complete",
       "category": "bug",
       "prompt": "Please file a bug. Description: cart quantity changes back to one after refresh. Steps: add two mugs, set quantity to three and refresh the cart. Environment: Safari 18 on an iPhone 16.",
-      "expected": "Summarize the supplied description, reproduction steps and Safari on iPhone environment, then state that the report is ready for the support team to file. Do not invent a ticket ID."
+      "expected": "Confirm that the bug report was created, include a real ticket ID and OPEN status, and preserve the supplied description, reproduction steps and Safari on iPhone environment."
     },
     {
       "id": "t3_bug_payment_precedence",

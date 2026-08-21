@@ -1,4 +1,4 @@
-"""Amazon Bedrock Agent action for creating a bug report in DynamoDB."""
+"""Create bug reports from Bedrock Flow Lambda nodes or Agent action groups."""
 
 from __future__ import annotations
 
@@ -57,6 +57,105 @@ def _validate(parameters: Dict[str, str]) -> Dict[str, str]:
     return cleaned
 
 
+def _flow_inputs(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the named inputs supplied by a Bedrock Flow Lambda node."""
+    return {
+        str(item.get("name", "")).strip(): item.get("value")
+        for item in event.get("node", {}).get("inputs", [])
+        if item.get("name")
+    }
+
+
+def _parse_flow_payload(value: Any) -> Dict[str, Any]:
+    """Parse the prompt node's strict JSON response defensively."""
+    if not isinstance(value, str):
+        raise ValueError("The bug intake response was not text.")
+    candidate = value.strip()
+    if candidate.startswith("```"):
+        lines = candidate.splitlines()
+        lines = lines[1:] if lines else lines
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        candidate = "\n".join(lines).strip()
+    try:
+        payload = json.loads(candidate)
+    except json.JSONDecodeError as error:
+        raise ValueError("The bug intake response was not valid JSON.") from error
+    if not isinstance(payload, dict):
+        raise ValueError("The bug intake response must be a JSON object.")
+    return payload
+
+
+def _create_item(
+    fields: Dict[str, str],
+    *,
+    source: str,
+    session_id: str | None = None,
+    flow_arn: str | None = None,
+) -> Dict[str, str]:
+    ticket_id = str(uuid.uuid4())
+    item = {
+        "ticketId": ticket_id,
+        "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "status": "OPEN",
+        "description": fields["description"],
+        "source": source,
+    }
+    for field in ("stepsToReproduce", "environment"):
+        if fields.get(field):
+            item[field] = fields[field]
+    if session_id:
+        item["sessionId"] = session_id
+    if flow_arn:
+        item["flowArn"] = flow_arn
+    _get_table().put_item(
+        Item=item,
+        ConditionExpression="attribute_not_exists(ticketId)",
+    )
+    return item
+
+
+def _handle_flow_event(event: Dict[str, Any]) -> str:
+    inputs = _flow_inputs(event)
+    payload = _parse_flow_payload(inputs.get("bugReport"))
+    status = str(payload.get("status", "")).strip().upper()
+    if status == "NEEDS_INFO":
+        message = str(payload.get("message", "")).strip()
+        return message or (
+            "Please provide a description, steps to reproduce and environment "
+            "information such as your browser, operating system or device."
+        )
+    if status != "READY":
+        return "I could not validate the bug report details. Please try again."
+
+    fields = {
+        field: str(payload.get(field, "")).strip() for field in SUPPORTED_FIELDS
+    }
+    missing = [field for field in SUPPORTED_FIELDS if not fields[field]]
+    if missing:
+        labels = {
+            "description": "a clear description",
+            "stepsToReproduce": "steps to reproduce",
+            "environment": "browser, operating system or device information",
+        }
+        return "Please provide " + ", ".join(labels[field] for field in missing) + "."
+
+    fields = _validate(fields)
+    flow = event.get("flow", {})
+    item = _create_item(
+        fields,
+        source="BEDROCK_FLOW",
+        flow_arn=str(flow.get("flowArn", "")).strip() or None,
+    )
+    return (
+        "Bug report created successfully. "
+        f"Ticket ID: {item['ticketId']}. Status: OPEN. "
+        f"Description: {item['description']} "
+        f"Steps to reproduce: {item['stepsToReproduce']} "
+        f"Environment: {item['environment']}"
+    )
+
+
 def _response(event: Dict[str, Any], body: Dict[str, Any], state: str | None = None):
     function_response: Dict[str, Any] = {
         "responseBody": {"TEXT": {"body": json.dumps(body, separators=(",", ":"))}}
@@ -77,36 +176,30 @@ def _response(event: Dict[str, Any], body: Dict[str, Any], state: str | None = N
 
 
 def lambda_handler(event: Dict[str, Any], context: Any):
-    """Validate an Agent function-details event and create one support ticket."""
+    """Validate a Bedrock Flow or Agent event and create one support ticket."""
     if event.get("messageVersion") != "1.0":
         return _response(event, {"error": "Unsupported message version"}, "FAILURE")
+    if event.get("flow") and event.get("node"):
+        try:
+            return _handle_flow_event(event)
+        except ValueError as error:
+            return f"I could not validate the bug report: {error}"
+        except Exception:
+            return "The ticket service is temporarily unavailable. Please try again later."
     if event.get("function") != "create_bug_report":
         return _response(event, {"error": "Unsupported function"}, "FAILURE")
 
     try:
         fields = _validate(_normalise_parameters(event.get("parameters", [])))
-        ticket_id = str(uuid.uuid4())
-        created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        item = {
-            "ticketId": ticket_id,
-            "createdAt": created_at,
-            "status": "OPEN",
-            "description": fields["description"],
-        }
-        if fields["stepsToReproduce"]:
-            item["stepsToReproduce"] = fields["stepsToReproduce"]
-        if fields["environment"]:
-            item["environment"] = fields["environment"]
-        if event.get("sessionId"):
-            item["sessionId"] = str(event["sessionId"])
-        _get_table().put_item(
-            Item=item,
-            ConditionExpression="attribute_not_exists(ticketId)",
+        item = _create_item(
+            fields,
+            source="BEDROCK_AGENT",
+            session_id=str(event.get("sessionId", "")).strip() or None,
         )
         return _response(
             event,
             {
-                "ticketId": ticket_id,
+                "ticketId": item["ticketId"],
                 "status": "OPEN",
                 "message": "Bug report created successfully.",
             },

@@ -4,7 +4,7 @@ A three-path customer support application for a fictional retailer, built with A
 
 The Flow classifies each message and routes it to one of three independent handlers:
 
-- **Bug report:** a prompt-based intake handler gathers a description, reproduction steps and environment details without inventing missing information. The Lambda tool is deployed and tested separately because Agents Classic cannot be connected in new AWS accounts.
+- **Bug report:** a prompt-based intake handler gathers a description, reproduction steps and environment details without inventing missing information. A native Flow `LambdaFunction` node then creates the ticket in DynamoDB and returns its ticket ID.
 - **Platform question:** a prompt answers from the embedded Northstar Shop FAQ for orders, shipping, returns, refunds, payments, products, accounts and privacy.
 - **Other request:** a separate prompt politely redirects the customer to the fictional support line at `+1-800-555-0147`.
 
@@ -16,12 +16,13 @@ flowchart LR
     I --> R{"Exact label routing"}
     C -->|"BUG, PLATFORM or OTHER"| R
     R -->|"BUG"| B["Bug intake prompt"]
-    B --> BO["Bug output"]
+    B --> L["CreateBugReport Lambda"]
+    L --> D[("DynamoDB BugReports")]
+    L --> BO["Bug output"]
     R -->|"PLATFORM"| F["Embedded FAQ prompt"]
     F --> FO["FAQ output"]
     R -->|"OTHER"| H["Human redirect prompt"]
     H --> HO["Human output"]
-    L["Lambda tool test"] --> D[("DynamoDB BugReports")]
 ```
 
 The classifier is instructed to return one exact label. A bug report takes precedence when a message also mentions a platform topic, such as a payment page error. Customer messages are treated as untrusted data in all prompts.
@@ -55,10 +56,10 @@ The classifier is instructed to return one exact label. A bug report takes prece
 > **[AWS availability notice (July 30, 2026)](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html):**
 > Amazon Bedrock Agents is now Agents Classic and is closed to new customers.
 > `AWS::Bedrock::Agent` and `CreateAgent` work only in accounts with prior
-> service activity. The Udacity reviewer explicitly approved a Prompt node as
-> the bug-handler replacement because AgentCore cannot be connected to a
-> Bedrock Flow Agent node. The Lambda and DynamoDB path remains independently
-> deployable and testable evidence.
+> service activity. The Udacity reviewer approved a Prompt node as the intake
+> replacement because AgentCore cannot be connected to a Bedrock Flow Agent
+> node. Flow version 5 connects that intake Prompt directly to a supported
+> `LambdaFunction` node, so ticket persistence is part of the deployed Flow.
 
 Bedrock Agents Classic is available in `us-east-1`, `us-east-2` and `us-west-2`. This project standardises every command on `us-east-1`.
 
@@ -70,7 +71,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## 2. Deploy and test the bug report tool
+## 2. Deploy the bug report tool
 
 Deploy the exact resources required by the project:
 
@@ -102,7 +103,7 @@ aws lambda invoke \
 cat work/lambda-response.json
 ```
 
-A successful response contains a generated `ticketId` and `"status":"OPEN"`. Confirm the matching item under **DynamoDB > BugReports > Explore table items**.
+A successful response contains a generated `ticketId` and `"status":"OPEN"`. The solution Flow invokes this same function after `BugReportAssistant`. Confirm the matching item under **DynamoDB > BugReports > Explore table items**.
 
 ## 3. Deploy the Bedrock Flow
 
@@ -184,9 +185,9 @@ python generate-eval-dataset.py \
 
 The script prints the traced node sequence for each prompt. It writes `output_eval_dataset.jsonl` by default. Each line contains `prompt`, `referenceResponse` and a precomputed `modelResponses` entry identified as `my-flow-app`. Failed invocations are preserved with a `[FLOW_ERROR]` prefix so they cannot be mistaken for successful responses.
 
-Bug tests cover both missing-detail follow-up wording and complete report summaries. Every test is a single Flow invocation because the accepted Prompt-node replacement is stateless.
+Bug tests cover both missing-detail follow-up wording and complete ticket creation. Every bug invocation reaches `CreateBugReport`; incomplete reports return the follow-up without a database write, while complete reports create an `OPEN` ticket.
 
-The checked-in live run invoked all ten tests against Flow version 4 with zero Flow errors. The trace log confirms that each test reached the correct dedicated output node. Amazon Bedrock Evaluations then scored the ten responses at **1.00 Correctness** using Nova Pro as the LLM judge.
+The checked-in regression run invoked all ten tests against Flow version 5 with zero Flow errors. The trace log confirms that each test reached the correct dedicated output node and every bug case passed through the Lambda node. The completed Amazon Bedrock Evaluation job scored the submitted ten-response dataset at **1.00 Correctness** using Nova Pro as the LLM judge.
 
 ## 7. Run Bedrock Evaluations
 
@@ -258,20 +259,21 @@ The evidence below was captured from the deployed `us-east-1` resources. Images 
 
 | Rubric requirement | Evidence |
 | --- | --- |
-| Full Flow with three paths and separate outputs | [Flow diagram](outputs/evidence/01-flow-diagram.jpg) |
+| Full Flow with three paths, Lambda and separate outputs | [Live version 5 diagram](outputs/evidence/13-flow-version-5-lambda.png), [AWS console Flow diagram](outputs/evidence/01-flow-diagram.jpg) |
 | Consistent classifier output | [Classifier prompt](outputs/evidence/02-classifier-prompt.jpg), [exact labels](outputs/evidence/02b-classifier-prompt-labels.jpg), [platform rule](outputs/evidence/02c-classifier-platform-rule.jpg) |
 | Condition routing | [BUG and PLATFORM rules](outputs/evidence/03-condition-routing-rules.jpg), [default OTHER route](outputs/evidence/03b-condition-default-route.jpg) |
 | Bug intake fields | [Required fields](outputs/evidence/04b-bug-required-fields.jpg) |
-| Complete bug response | [Input and response](outputs/evidence/05-bug-complete-response-top.jpg), [response continuation](outputs/evidence/05-bug-complete-response.jpg) |
+| Complete bug response with ticket ID | [Live Flow input and ticket response](outputs/evidence/14-bug-flow-ticket-created.png) |
 | Bug follow-up response | [Input and answer](outputs/evidence/06c-bug-follow-up-input-and-answer.jpg), [follow-up continuation](outputs/evidence/06-bug-follow-up-response.jpg) |
-| Embedded FAQ content | [FAQ prompt](outputs/evidence/07b-faq-shipping-items.jpg), [delivery facts](outputs/evidence/07c-faq-delivery-prices.jpg) |
-| Covered FAQ question | [Shipping answer](outputs/evidence/08-faq-covered-input-answer.jpg) |
-| Uncovered FAQ question | [Human support fallback](outputs/evidence/09-faq-uncovered-input-answer.jpg) |
-| Other-request path | [Human redirect](outputs/evidence/10-other-request-input-answer.jpg) |
-| Persisted bug report | [DynamoDB ticket fields and steps](outputs/evidence/11b-dynamodb-ticket-steps.jpg) |
+| Flow-created DynamoDB record | [Matching `BugReports` item](outputs/evidence/15-dynamodb-matching-flow-ticket.png) |
+| Embedded FAQ content | [Readable deployed prompt excerpt](outputs/evidence/16-faq-prompt-readable.png), [AWS console FAQ prompt](outputs/evidence/07b-faq-shipping-items.jpg) |
+| Covered FAQ question | [Readable input and output](outputs/evidence/17-faq-covered-readable.png) |
+| Uncovered FAQ question | [Readable input and support fallback](outputs/evidence/18-faq-uncovered-readable.png) |
+| Other-request path | [Readable input and human redirect](outputs/evidence/19-other-request-readable.png) |
 | Automated test suite | [`flow-tests.json`](flow-tests.json), [generated JSONL](outputs/output_eval_dataset.jsonl), [live trace log](outputs/eval-run.log) |
 | Bedrock LLM-as-a-judge result | [Correctness 1.00 results page](outputs/evidence/12-evaluation-results.jpg) |
 | Written evaluation observation | [Evaluation observations](outputs/evaluation-observations.md) |
+| Live version 5 verification transcript | [Flow, ticket and route verification](outputs/live-flow-verification.md) |
 
 ## Cleanup
 

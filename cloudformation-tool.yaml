@@ -54,7 +54,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: create-bug-report
-      Description: Creates validated customer support tickets for a Bedrock Agent
+      Description: Creates validated customer support tickets for a Bedrock Flow or Agent
       Code:
         ZipFile: |
           import json
@@ -71,6 +71,94 @@ Resources:
               "stepsToReproduce": 4000,
               "environment": 1000,
           }
+
+          def validate(parameters, require_all=False):
+              cleaned = {
+                  field: str(parameters.get(field, "")).strip()
+                  for field in supported_fields
+              }
+              required = supported_fields if require_all else ("description",)
+              missing = [field for field in required if not cleaned[field]]
+              if missing:
+                  return None, missing
+              for field, maximum in max_lengths.items():
+                  if len(cleaned[field]) > maximum:
+                      raise ValueError(f"{field} must not exceed {maximum} characters")
+              return cleaned, []
+
+          def create_item(fields, source, session_id=None, flow_arn=None):
+              ticket_id = str(uuid.uuid4())
+              item = {
+                  "ticketId": ticket_id,
+                  "description": fields["description"],
+                  "status": "OPEN",
+                  "source": source,
+                  "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+              }
+              for field in ("stepsToReproduce", "environment"):
+                  if fields.get(field):
+                      item[field] = fields[field]
+              if session_id:
+                  item["sessionId"] = str(session_id)
+              if flow_arn:
+                  item["flowArn"] = str(flow_arn)
+              table.put_item(
+                  Item=item,
+                  ConditionExpression="attribute_not_exists(ticketId)",
+              )
+              return item
+
+          def parse_flow_payload(value):
+              if not isinstance(value, str):
+                  raise ValueError("The bug intake response was not text.")
+              candidate = value.strip()
+              if candidate.startswith("```"):
+                  lines = candidate.splitlines()[1:]
+                  if lines and lines[-1].strip().startswith("```"):
+                      lines = lines[:-1]
+                  candidate = "\n".join(lines).strip()
+              payload = json.loads(candidate)
+              if not isinstance(payload, dict):
+                  raise ValueError("The bug intake response must be a JSON object.")
+              return payload
+
+          def flow_response(event):
+              inputs = {
+                  str(item.get("name", "")).strip(): item.get("value")
+                  for item in event.get("node", {}).get("inputs", [])
+                  if item.get("name")
+              }
+              payload = parse_flow_payload(inputs.get("bugReport"))
+              status = str(payload.get("status", "")).strip().upper()
+              if status == "NEEDS_INFO":
+                  return str(payload.get("message", "")).strip() or (
+                      "Please provide a description, steps to reproduce and environment "
+                      "information such as your browser, operating system or device."
+                  )
+              if status != "READY":
+                  return "I could not validate the bug report details. Please try again."
+
+              fields, missing = validate(payload, require_all=True)
+              if missing:
+                  labels = {
+                      "description": "a clear description",
+                      "stepsToReproduce": "steps to reproduce",
+                      "environment": "browser, operating system or device information",
+                  }
+                  return "Please provide " + ", ".join(labels[field] for field in missing) + "."
+              flow = event.get("flow", {})
+              item = create_item(
+                  fields,
+                  "BEDROCK_FLOW",
+                  flow_arn=flow.get("flowArn"),
+              )
+              return (
+                  "Bug report created successfully. "
+                  f"Ticket ID: {item['ticketId']}. Status: OPEN. "
+                  f"Description: {item['description']} "
+                  f"Steps to reproduce: {item['stepsToReproduce']} "
+                  f"Environment: {item['environment']}"
+              )
 
           def response(event, body, state=None):
               function_response = {
@@ -96,46 +184,36 @@ Resources:
           def lambda_handler(event, context):
               if event.get("messageVersion") != "1.0":
                   return response(event, {"error": "Unsupported message version"}, "FAILURE")
+              if event.get("flow") and event.get("node"):
+                  try:
+                      return flow_response(event)
+                  except ValueError as error:
+                      return f"I could not validate the bug report: {error}"
+                  except Exception:
+                      return "The ticket service is temporarily unavailable. Please try again later."
               if event.get("function") != "create_bug_report":
                   return response(event, {"error": "Unsupported function"}, "FAILURE")
 
-              parameters = {
-                  str(item.get("name", "")).strip(): str(item.get("value", "")).strip()
-                  for item in event.get("parameters", [])
-                  if item.get("name")
-              }
-              if not parameters.get("description"):
-                  return response(
-                      event,
-                      {"error": "Missing required field: description"},
-                      "REPROMPT",
-                  )
-              for field in supported_fields:
-                  if len(parameters.get(field, "")) > max_lengths[field]:
+              try:
+                  parameters = {
+                      str(item.get("name", "")).strip(): str(item.get("value", "")).strip()
+                      for item in event.get("parameters", [])
+                      if item.get("name")
+                  }
+                  fields, missing = validate(parameters)
+                  if missing:
                       return response(
                           event,
-                          {"error": f"{field} must not exceed {max_lengths[field]} characters"},
+                          {"error": "Missing required field: description"},
                           "REPROMPT",
                       )
-
-              ticket_id = str(uuid.uuid4())
-              item = {
-                  "ticketId": ticket_id,
-                  "description": parameters["description"],
-                  "status": "OPEN",
-                  "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-              }
-              for field in ("stepsToReproduce", "environment"):
-                  if parameters.get(field):
-                      item[field] = parameters[field]
-              if event.get("sessionId"):
-                  item["sessionId"] = str(event["sessionId"])
-
-              try:
-                  table.put_item(
-                      Item=item,
-                      ConditionExpression="attribute_not_exists(ticketId)",
+                  item = create_item(
+                      fields,
+                      "BEDROCK_AGENT",
+                      session_id=event.get("sessionId"),
                   )
+              except ValueError as error:
+                  return response(event, {"error": str(error)}, "REPROMPT")
               except Exception:
                   return response(
                       event,
@@ -145,7 +223,7 @@ Resources:
               return response(
                   event,
                   {
-                      "ticketId": ticket_id,
+                      "ticketId": item["ticketId"],
                       "status": "OPEN",
                       "message": "Bug report created successfully.",
                   },

@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Northstar Shop, live AWS verification</title>
+  <style>
+    :root {
+      --canvas: #eef3f8;
+      --paper: #ffffff;
+      --ink: #152132;
+      --muted: #5d6b7c;
+      --line: #c9d5e2;
+      --aws: #ff9900;
+      --bedrock: #6b49d8;
+      --lambda: #c84630;
+      --success: #087f5b;
+      --navy: #17385f;
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--canvas); }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { padding: 32px; }
+    .evidence {
+      width: min(1280px, calc(100vw - 64px));
+      min-height: 720px;
+      margin: 0 auto 36px;
+      padding: 42px 48px;
+      overflow: hidden;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 16px 44px rgba(23, 56, 95, .12);
+    }
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      color: var(--navy);
+      font-size: 13px;
+      font-weight: 750;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .eyebrow::before {
+      width: 12px;
+      height: 12px;
+      content: "";
+      background: var(--aws);
+      border-radius: 3px;
+    }
+    h1, h2, p { margin-top: 0; }
+    h1, h2 { color: var(--navy); letter-spacing: -.03em; }
+    h1 { margin-bottom: 10px; font-size: 38px; line-height: 1.05; }
+    h2 { margin-bottom: 8px; font-size: 28px; }
+    .lede { max-width: 920px; color: var(--muted); font-size: 17px; line-height: 1.5; }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 20px 0 28px;
+    }
+    .pill {
+      padding: 7px 11px;
+      color: var(--navy);
+      background: #f3f6fa;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .pill.live { color: #056046; background: #e7f8f1; border-color: #95d8c1; }
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr 1.05fr 1.05fr 1.25fr 1.1fr 1fr;
+      gap: 20px;
+      align-items: center;
+      margin-top: 62px;
+    }
+    .node {
+      position: relative;
+      min-height: 102px;
+      padding: 18px;
+      background: #fafbfe;
+      border: 2px solid #aab8ca;
+      border-radius: 14px;
+    }
+    .node::after {
+      position: absolute;
+      top: 49%;
+      right: -22px;
+      width: 22px;
+      height: 2px;
+      content: "";
+      background: #7c8da2;
+    }
+    .node:last-child::after { display: none; }
+    .node b { display: block; margin-bottom: 6px; color: var(--navy); font-size: 15px; }
+    .node span { color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .node.prompt { border-color: var(--bedrock); }
+    .node.lambda { color: white; background: #fff4f0; border-color: var(--lambda); }
+    .branches {
+      display: grid;
+      grid-column: 4 / span 3;
+      grid-template-columns: 1.25fr 1fr .95fr;
+      gap: 13px 20px;
+    }
+    .branches .node { min-height: 82px; }
+    .bridge {
+      position: relative;
+      min-height: 82px;
+    }
+    .bridge::after {
+      position: absolute;
+      top: 49%;
+      left: 0;
+      width: calc(100% + 20px);
+      height: 2px;
+      content: "";
+      background: #7c8da2;
+    }
+    .branch-label {
+      position: absolute;
+      top: -21px;
+      left: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .08em;
+    }
+    .bug-path {
+      margin-top: 48px;
+      padding: 18px 22px;
+      color: #4a2e00;
+      background: #fff5df;
+      border-left: 5px solid var(--aws);
+      border-radius: 8px;
+      font: 700 15px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-top: 28px;
+    }
+    .panel {
+      padding: 22px;
+      background: #f7f9fc;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+    .panel h3 {
+      margin: 0 0 13px;
+      color: var(--navy);
+      font-size: 15px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .panel p, .panel li { font-size: 15px; line-height: 1.52; }
+    .panel p:last-child { margin-bottom: 0; }
+    .response { border-left: 5px solid var(--success); }
+    .ticket {
+      margin: 13px 0;
+      padding: 11px 13px;
+      color: #045d43;
+      background: #e7f8f1;
+      border-radius: 8px;
+      font: 800 15px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+      overflow-wrap: anywhere;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { width: 31%; color: var(--muted); font-size: 12px; letter-spacing: .05em; text-transform: uppercase; }
+    td { font-size: 14px; font-weight: 600; line-height: 1.4; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .match {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 15px;
+      color: var(--success);
+      font-size: 15px;
+      font-weight: 800;
+    }
+    .match::before {
+      display: grid;
+      width: 25px;
+      height: 25px;
+      content: "✓";
+      color: white;
+      background: var(--success);
+      border-radius: 50%;
+      place-items: center;
+    }
+    .prompt {
+      margin-top: 25px;
+      padding: 24px;
+      color: #26374c;
+      background: #f7f4ff;
+      border: 2px solid #cbbdf3;
+      border-radius: 14px;
+      font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+    }
+    .prompt strong { color: #5633c2; }
+    .conversation {
+      display: grid;
+      gap: 18px;
+      margin-top: 32px;
+    }
+    .turn {
+      max-width: 920px;
+      padding: 19px 22px;
+      border-radius: 16px;
+      font-size: 17px;
+      line-height: 1.5;
+    }
+    .turn.customer { justify-self: end; color: white; background: var(--navy); border-bottom-right-radius: 5px; }
+    .turn.assistant { background: #edf7f3; border: 1px solid #a9d8c7; border-bottom-left-radius: 5px; }
+    .turn b { display: block; margin-bottom: 6px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+    .route {
+      justify-self: start;
+      padding: 7px 11px;
+      color: #593aa8;
+      background: #eee8ff;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+    .footer {
+      margin-top: 24px;
+      color: var(--muted);
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    @media (max-width: 720px) {
+      main { padding: 12px; }
+      .evidence { width: 100%; min-height: 0; padding: 26px 20px; border-radius: 12px; }
+      h1 { font-size: 30px; }
+      .flow, .split { grid-template-columns: 1fr; }
+      .flow { margin-top: 28px; }
+      .branches { grid-column: auto; grid-template-columns: 1fr; }
+      .node::after { top: auto; right: 50%; bottom: -22px; width: 2px; height: 22px; }
+      .turn { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <section class="evidence" id="flow">
+    <div class="eyebrow">Amazon Bedrock live deployment</div>
+    <h1>Customer support Flow, version 5</h1>
+    <p class="lede">The published <strong>live</strong> alias routes every customer message through a deterministic classifier and three distinct output paths. The bug path invokes Lambda before returning to the customer.</p>
+    <div class="meta"><span class="pill live">Prepared</span><span class="pill">Region us-east-1</span><span class="pill">Alias live → v5</span><span class="pill">10 automated cases</span></div>
+    <div class="flow">
+      <div class="node"><b>FlowInput</b><span>Input</span></div>
+      <div class="node prompt"><b>ClassifyRequest</b><span>Prompt, outputs BUG, PLATFORM or OTHER</span></div>
+      <div class="node"><b>RouteRequest</b><span>Condition</span></div>
+      <div class="branches">
+        <div class="node prompt"><i class="branch-label">BUG</i><b>BugReportAssistant</b><span>Prompt, strict JSON intake</span></div>
+        <div class="node lambda"><b>CreateBugReport</b><span>LambdaFunction</span></div>
+        <div class="node"><b>BugOutput</b><span>Output</span></div>
+        <div class="node prompt"><i class="branch-label">PLATFORM</i><b>AnswerFAQ</b><span>Prompt, embedded FAQ</span></div>
+        <div class="bridge" aria-hidden="true"></div>
+        <div class="node"><b>FAQOutput</b><span>Output</span></div>
+        <div class="node prompt"><i class="branch-label">OTHER</i><b>RedirectHuman</b><span>Prompt, support line</span></div>
+        <div class="bridge" aria-hidden="true"></div>
+        <div class="node"><b>HumanOutput</b><span>Output</span></div>
+      </div>
+    </div>
+    <div class="bug-path">BUG: BugReportAssistant → CreateBugReport → BugOutput → DynamoDB BugReports</div>
+    <p class="footer">Verified with AWS Bedrock APIs after CloudFormation deployment on 2026-08-21.</p>
+  </section>
+
+  <section class="evidence" id="bug">
+    <div class="eyebrow">Live Flow test</div>
+    <h2>Bug report created through the Flow</h2>
+    <p class="lede">The input contained all three required fields. The published Flow called its Lambda node and returned the new ticket identifier.</p>
+    <div class="split">
+      <div class="panel">
+        <h3>Customer input</h3>
+        <p>Please file a bug. <strong>Description:</strong> checkout freezes after pressing Continue. <strong>Steps:</strong> add a blue mug, open checkout, press Continue. <strong>Environment:</strong> Chrome 128 on macOS Sonoma.</p>
+      </div>
+      <div class="panel response">
+        <h3>BugOutput</h3>
+        <p><strong>Bug report created successfully.</strong></p>
+        <div class="ticket">e73694db-d71d-4ef5-a47f-e695ad5c4156</div>
+        <p>Status: <strong>OPEN</strong></p>
+        <p>Description, steps and environment were preserved in the response.</p>
+      </div>
+    </div>
+    <div class="bug-path">Trace: FlowInput → ClassifyRequest → RouteRequest → BugReportAssistant → CreateBugReport → BugOutput</div>
+    <p class="footer">Live invocation completed on 2026-08-21 at 13:50 UTC, region us-east-1.</p>
+  </section>
+
+  <section class="evidence" id="dynamodb">
+    <div class="eyebrow">Amazon DynamoDB persistence check</div>
+    <h2>Matching BugReports item</h2>
+    <p class="lede">A read by the exact Flow-returned partition key produced this item.</p>
+    <table>
+      <tr><th>ticketId</th><td><code>e73694db-d71d-4ef5-a47f-e695ad5c4156</code></td></tr>
+      <tr><th>createdAt</th><td><code>2026-08-21T13:50:26.871829Z</code></td></tr>
+      <tr><th>status</th><td>OPEN</td></tr>
+      <tr><th>description</th><td>checkout freezes after pressing Continue</td></tr>
+      <tr><th>stepsToReproduce</th><td>add a blue mug, open checkout, press Continue</td></tr>
+      <tr><th>environment</th><td>Chrome 128 on macOS Sonoma</td></tr>
+      <tr><th>source</th><td>BEDROCK_FLOW</td></tr>
+    </table>
+    <div class="match">Ticket ID matches the Flow response</div>
+    <p class="footer">Table: BugReports. Read-only verification performed in us-east-1 after the live Flow invocation.</p>
+  </section>
+
+  <section class="evidence" id="faq-prompt">
+    <div class="eyebrow">AnswerFAQ prompt configuration</div>
+    <h2>Embedded FAQ and grounded fallback</h2>
+    <p class="lede">The Platform path answers only from the embedded reference content. Missing answers are redirected to human support.</p>
+    <div class="prompt"><strong>Instructions</strong>
+Answer Northstar Shop platform questions only from the FAQ below. Do not add policies or facts. If the FAQ does not contain the answer, say that you do not have that information and direct the customer to +1-800-555-0147.
+
+<strong>Embedded FAQ excerpts</strong>
+• Track orders in Account &gt; Orders &gt; Track shipment. Tracking can take 24 hours to update after dispatch.
+• Standard delivery takes 3 to 5 business days. Express delivery takes 1 to 2 business days.
+• Express shipping costs $14.99.
+• Most unused items in original packaging may be returned within 30 calendar days.
+• Final-sale items, gift cards and personalised products cannot be returned.
+• Human support is +1-800-555-0147, Monday to Friday, 9 AM to 6 PM ET.</div>
+    <p class="footer">Model temperature: 0. Prompt source: deployed Flow definition, version 5.</p>
+  </section>
+
+  <section class="evidence" id="faq-covered">
+    <div class="eyebrow">Live Flow test, covered FAQ</div>
+    <h2>Order tracking answer stays grounded</h2>
+    <div class="conversation">
+      <div class="route">PLATFORM → AnswerFAQ → FAQOutput</div>
+      <div class="turn customer"><b>Customer</b>Where can I track my order?</div>
+      <div class="turn assistant"><b>FAQOutput</b>You can track your order in your Account &gt; Orders &gt; Track shipment. Please note that tracking updates can take up to 24 hours after dispatch.</div>
+    </div>
+    <p class="footer">Live test t4, deployed alias live, Flow version 5.</p>
+  </section>
+
+  <section class="evidence" id="faq-uncovered">
+    <div class="eyebrow">Live Flow test, uncovered FAQ</div>
+    <h2>Unknown policy redirects to human support</h2>
+    <div class="conversation">
+      <div class="route">PLATFORM → AnswerFAQ → FAQOutput</div>
+      <div class="turn customer"><b>Customer</b>Do you offer gift wrapping for orders?</div>
+      <div class="turn assistant"><b>FAQOutput</b>I do not have that information. Please call our support at <strong>+1-800-555-0147</strong> for more details.</div>
+    </div>
+    <p class="footer">Live test t7, no gift-wrapping policy was invented.</p>
+  </section>
+
+  <section class="evidence" id="other">
+    <div class="eyebrow">Live Flow test, other request</div>
+    <h2>Out-of-scope request uses its own output</h2>
+    <div class="conversation">
+      <div class="route">OTHER → RedirectHuman → HumanOutput</div>
+      <div class="turn customer"><b>Customer</b>Can you help me write a résumé for a software job?</div>
+      <div class="turn assistant"><b>HumanOutput</b>We cannot assist with writing résumés. For personalized assistance, please call <strong>+1-800-555-0147</strong>, Monday to Friday, 9 AM to 6 PM Eastern Time.</div>
+    </div>
+    <p class="footer">Live test t8, deployed alias live, Flow version 5.</p>
+  </section>
+</main>
+</body>
+</html>

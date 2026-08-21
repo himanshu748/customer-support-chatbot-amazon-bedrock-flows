@@ -35,6 +35,29 @@ VALID_PARAMETERS = {
 }
 
 
+def flow_event(payload):
+    return {
+        "messageVersion": "1.0",
+        "flow": {
+            "flowArn": "arn:aws:bedrock:us-east-1:111122223333:flow/TESTFLOW",
+            "flowAliasArn": (
+                "arn:aws:bedrock:us-east-1:111122223333:flow/TESTFLOW/alias/LIVE"
+            ),
+        },
+        "node": {
+            "name": "CreateBugReport",
+            "inputs": [
+                {
+                    "name": "bugReport",
+                    "type": "String",
+                    "expression": "$.data",
+                    "value": json.dumps(payload),
+                }
+            ],
+        },
+    }
+
+
 class CreateBugReportTests(unittest.TestCase):
     def setUp(self):
         self.table = FakeTable()
@@ -106,6 +129,63 @@ class CreateBugReportTests(unittest.TestCase):
 
         self.assertEqual({"session": "kept"}, response["sessionAttributes"])
         self.assertEqual({"turn": "kept"}, response["promptSessionAttributes"])
+
+    def test_flow_event_creates_ticket_and_returns_matching_ticket_id(self):
+        response = create_bug_report.lambda_handler(
+            flow_event(
+                {
+                    "status": "READY",
+                    **VALID_PARAMETERS,
+                }
+            ),
+            None,
+        )
+
+        self.assertEqual(1, len(self.table.calls))
+        item = self.table.calls[0]["Item"]
+        self.assertIn(item["ticketId"], response)
+        self.assertIn("Bug report created successfully", response)
+        self.assertIn("Status: OPEN", response)
+        self.assertEqual("BEDROCK_FLOW", item["source"])
+        self.assertEqual(VALID_PARAMETERS["description"], item["description"])
+        self.assertEqual(
+            VALID_PARAMETERS["stepsToReproduce"], item["stepsToReproduce"]
+        )
+        self.assertEqual(VALID_PARAMETERS["environment"], item["environment"])
+
+    def test_incomplete_flow_event_asks_for_details_without_writing(self):
+        response = create_bug_report.lambda_handler(
+            flow_event(
+                {
+                    "status": "NEEDS_INFO",
+                    "message": (
+                        "Please provide the steps to reproduce and your browser, "
+                        "operating system or device."
+                    ),
+                }
+            ),
+            None,
+        )
+
+        self.assertIn("steps to reproduce", response)
+        self.assertIn("browser", response)
+        self.assertEqual([], self.table.calls)
+
+    def test_ready_flow_event_requires_all_three_bug_fields(self):
+        response = create_bug_report.lambda_handler(
+            flow_event(
+                {
+                    "status": "READY",
+                    "description": VALID_PARAMETERS["description"],
+                    "stepsToReproduce": "",
+                    "environment": VALID_PARAMETERS["environment"],
+                }
+            ),
+            None,
+        )
+
+        self.assertIn("steps to reproduce", response.lower())
+        self.assertEqual([], self.table.calls)
 
 
 if __name__ == "__main__":
