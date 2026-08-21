@@ -1,10 +1,10 @@
 # Customer Support Chatbot with Amazon Bedrock Flows
 
-A three-path customer support application for a fictional retailer, built with Amazon Bedrock Flows, Bedrock Agents, AWS Lambda and DynamoDB.
+A three-path customer support application for a fictional retailer, built with Amazon Bedrock Flows, prompt nodes, AWS Lambda and DynamoDB.
 
 The Flow classifies each message and routes it to one of three independent handlers:
 
-- **Bug report:** a Bedrock Agent gathers a description, optional reproduction steps and optional environment details, then calls a Lambda action to store an `OPEN` ticket in DynamoDB.
+- **Bug report:** a prompt-based intake handler gathers a description, reproduction steps and environment details without inventing missing information. The Lambda tool is deployed and tested separately because Agents Classic cannot be connected in new AWS accounts.
 - **Platform question:** a prompt answers from the embedded Northstar Shop FAQ for orders, shipping, returns, refunds, payments, products, accounts and privacy.
 - **Other request:** a separate prompt politely redirects the customer to the fictional support line at `+1-800-555-0147`.
 
@@ -15,14 +15,13 @@ flowchart LR
     I["Flow input"] --> C["Classifier prompt"]
     I --> R{"Exact label routing"}
     C -->|"BUG, PLATFORM or OTHER"| R
-    R -->|"BUG"| A["Bedrock Agent"]
-    A --> L["Lambda action"]
-    L --> D[("DynamoDB BugReports")]
-    A --> BO["Bug output"]
+    R -->|"BUG"| B["Bug intake prompt"]
+    B --> BO["Bug output"]
     R -->|"PLATFORM"| F["Embedded FAQ prompt"]
     F --> FO["FAQ output"]
     R -->|"OTHER"| H["Human redirect prompt"]
     H --> HO["Human output"]
+    L["Lambda tool test"] --> D[("DynamoDB BugReports")]
 ```
 
 The classifier is instructed to return one exact label. A bug report takes precedence when a message also mentions a platform topic, such as a payment page error. Customer messages are treated as untrusted data in all prompts.
@@ -32,14 +31,15 @@ The classifier is instructed to return one exact label. A bug report takes prece
 | File | Purpose |
 | --- | --- |
 | `cloudformation-tool.yaml` | Deploys the `BugReports` table, `create-bug-report-role` and `create-bug-report` Lambda function |
-| `cloudformation-solution.yaml` | Deploys the Bedrock Agent, three-path Flow, Flow version and live alias |
+| `cloudformation-solution.yaml` | Deploys the prompt-based three-path Flow, Flow version and live alias |
 | `cloudformation-testing.yaml` | Deploys the evaluation S3 bucket and Bedrock evaluation role |
 | `create_bug_report.py` | Readable and unit-tested source for the inline Lambda implementation |
 | `online_shop_faq.md` | Fictional platform FAQ used to develop the embedded prompt |
-| `chat.py` | Terminal chat client with Bedrock Agent multi-turn support |
+| `chat.py` | Terminal client for invoking the deployed Flow |
 | `generate-eval-dataset.py` | Invokes the Flow and creates Bedrock Evaluations JSONL data |
 | `flow-tests.json` | Test suite covering all three routes and prompt injection cases |
 | `evaluation-observations-template.md` | Template for documenting evaluation results after an AWS run |
+| `REVIEWER-REMEDIATION.md` | Maps the first review feedback to the accepted implementation and evidence |
 
 ## Prerequisites
 
@@ -51,14 +51,11 @@ The classifier is instructed to return one exact label. A bug report takes prece
 
 > **[AWS availability notice (July 30, 2026)](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html):**
 > Amazon Bedrock Agents is now Agents Classic and is closed to new customers.
-> `AWS::Bedrock::Agent` and
-> `CreateAgent` work only in accounts with Bedrock Agents activity during the
-> previous 12 months. AWS provides no exception process for new accounts and
-> recommends AgentCore for new agent development. This project intentionally
-> retains Agents Classic because the Udacity rubric explicitly requires a
-> Bedrock Agent node. Use an allowlisted training account or ask the course
-> provider for an updated AgentCore rubric if `CreateAgent` returns the
-> maintenance-mode `AccessDeniedException`.
+> `AWS::Bedrock::Agent` and `CreateAgent` work only in accounts with prior
+> service activity. The Udacity reviewer explicitly approved a Prompt node as
+> the bug-handler replacement because AgentCore cannot be connected to a
+> Bedrock Flow Agent node. The Lambda and DynamoDB path remains independently
+> deployable and testable evidence.
 
 Bedrock Agents Classic is available in `us-east-1`, `us-east-2` and `us-west-2`. This project standardises every command on `us-east-1`.
 
@@ -104,26 +101,15 @@ cat work/lambda-response.json
 
 A successful response contains a generated `ticketId` and `"status":"OPEN"`. Confirm the matching item under **DynamoDB > BugReports > Explore table items**.
 
-## 3. Deploy the Bedrock Agent and Flow
-
-Retrieve the Lambda ARN:
-
-```bash
-BUG_REPORT_FUNCTION_ARN=$(aws cloudformation describe-stacks \
-  --stack-name bug-report-tool-stack \
-  --query "Stacks[0].Outputs[?OutputKey=='BugReportFunctionArn'].OutputValue" \
-  --output text \
-  --region us-east-1)
-```
+## 3. Deploy the Bedrock Flow
 
 Deploy the solution stack:
 
 ```bash
 aws cloudformation deploy \
   --template-file cloudformation-solution.yaml \
-  --stack-name customer-support-bedrock-stack \
+  --stack-name customer-support-flow-stack \
   --parameter-overrides \
-    BugReportFunctionArn="$BUG_REPORT_FUNCTION_ARN" \
     ModelId=amazon.nova-lite-v1:0 \
   --capabilities CAPABILITY_NAMED_IAM \
   --region us-east-1
@@ -141,7 +127,7 @@ Pass another model when needed:
 ./scripts/deploy.sh --model-id <supported-model-id-or-inference-profile-arn>
 ```
 
-After changing the Agent or Flow, deploy again so CloudFormation prepares the Agent, creates a new Flow version and updates the `live` alias.
+After changing the Flow, deploy again so CloudFormation creates a new Flow version and updates the `live` alias.
 
 ## 4. Chat with the Flow
 
@@ -149,7 +135,7 @@ Get the Flow and alias IDs:
 
 ```bash
 aws cloudformation describe-stacks \
-  --stack-name customer-support-bedrock-stack \
+  --stack-name customer-support-flow-stack \
   --query 'Stacks[0].Outputs' \
   --output table \
   --region us-east-1
@@ -194,7 +180,7 @@ python generate-eval-dataset.py \
 
 The script prints the traced node sequence for each prompt. It writes `output_eval_dataset.jsonl` by default. Each line contains `prompt`, `referenceResponse` and a precomputed `modelResponses` entry identified as `my-flow-app`. Failed invocations are preserved with a `[FLOW_ERROR]` prefix so they cannot be mistaken for successful responses.
 
-Bug tests may supply `follow_up_responses`. The script resumes the same Flow execution when the Agent requests missing information.
+Bug tests cover both missing-detail follow-up wording and complete report summaries. Every test is a single Flow invocation because the accepted Prompt-node replacement is stateless.
 
 ## 7. Run Bedrock Evaluations
 
@@ -270,14 +256,14 @@ aws cloudformation delete-stack \
   --stack-name bug-report-testing-stack \
   --region us-east-1
 aws cloudformation delete-stack \
-  --stack-name customer-support-bedrock-stack \
+  --stack-name customer-support-flow-stack \
   --region us-east-1
 aws cloudformation delete-stack \
   --stack-name bug-report-tool-stack \
   --region us-east-1
 ```
 
-CloudFormation removes the infrastructure it created. If you built the Agent or Flow manually in the console, delete those resources there.
+CloudFormation removes the infrastructure it created. If you built a Flow manually in the console, delete that resource there.
 
 ## Security and cost notes
 

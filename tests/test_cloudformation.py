@@ -139,44 +139,36 @@ class CloudFormationTests(unittest.TestCase):
 
         self.assertTrue(
             {
-                ("BugAgent", "agentInputText"),
+                ("BugReportAssistant", "report"),
                 ("AnswerFAQ", "question"),
                 ("RedirectHuman", "request"),
             }.issubset(data_targets)
         )
         self.assertEqual(
             {
-                "Bug": "BugAgent",
+                "Bug": "BugReportAssistant",
                 "Platform": "AnswerFAQ",
                 "default": "RedirectHuman",
             },
             conditional_targets,
         )
 
-    def test_bug_agent_has_lambda_action_group_and_collection_fields(self):
+    def test_bug_prompt_collects_required_fields_without_claiming_a_ticket(self):
         template = load_template("cloudformation-solution.yaml")
-        resources = template["Resources"]
-        agent = resources["BugReportAgent"]["Properties"]
-        groups = {group["ActionGroupName"]: group for group in agent["ActionGroups"]}
+        definition = template["Resources"]["CustomerSupportFlow"]["Properties"]
+        nodes = {node["Name"]: node for node in definition["Definition"]["Nodes"]}
+        bug_node = nodes["BugReportAssistant"]
+        self.assertEqual("Prompt", bug_node["Type"])
+        inline = bug_node["Configuration"]["Prompt"]["SourceConfiguration"]["Inline"]
+        prompt_text = inline["TemplateConfiguration"]["Text"]["Text"]
+        self.assertIn("description", prompt_text.lower())
+        self.assertIn("steps to reproduce", prompt_text.lower())
+        self.assertIn("environment", prompt_text.lower())
+        self.assertIn("Never claim that a database ticket", prompt_text)
+        self.assertEqual(0, inline["InferenceConfiguration"]["Text"]["Temperature"])
 
-        action_group = groups["bug-report-actions"]
-        self.assertEqual("ENABLED", action_group["ActionGroupState"])
-        self.assertEqual(
-            "BugReportFunctionArn", action_group["ActionGroupExecutor"]["Lambda"]
-        )
-        function = action_group["FunctionSchema"]["Functions"][0]
-        self.assertEqual("create_bug_report", function["Name"])
-        self.assertEqual(
-            {"description", "stepsToReproduce", "environment"},
-            set(function["Parameters"]),
-        )
-        self.assertTrue(function["Parameters"]["description"]["Required"])
-        self.assertFalse(function["Parameters"]["stepsToReproduce"]["Required"])
-        self.assertFalse(function["Parameters"]["environment"]["Required"])
-        self.assertEqual(
-            "AMAZON.UserInput",
-            groups["RequestMissingBugDetails"]["ParentActionGroupSignature"],
-        )
+        self.assertNotIn("BugReportAgent", template["Resources"])
+        self.assertNotIn("BugReportAgentAlias", template["Resources"])
 
     def test_classifier_and_faq_prompts_match_rubric_contract(self):
         template = load_template("cloudformation-solution.yaml")

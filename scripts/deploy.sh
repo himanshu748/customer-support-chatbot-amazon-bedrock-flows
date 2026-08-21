@@ -2,16 +2,21 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 [--model-id MODEL]"
+  echo "Usage: $0 [--model-id MODEL] [--solution-stack-name NAME]"
 }
 
 deploy_region="us-east-1"
 model_id="amazon.nova-lite-v1:0"
+solution_stack_name="customer-support-flow-stack"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --model-id)
       model_id="$2"
+      shift 2
+      ;;
+    --solution-stack-name)
+      solution_stack_name="$2"
       shift 2
       ;;
     -h|--help)
@@ -32,22 +37,10 @@ aws cloudformation deploy \
   --region "$deploy_region" \
   --no-fail-on-empty-changeset
 
-function_arn="$(aws cloudformation describe-stacks \
-  --region "$deploy_region" \
-  --stack-name bug-report-tool-stack \
-  --query "Stacks[0].Outputs[?OutputKey=='BugReportFunctionArn'].OutputValue" \
-  --output text)"
-
-if [[ -z "$function_arn" || "$function_arn" == "None" ]]; then
-  echo "Could not read BugReportFunctionArn from bug-report-tool-stack." >&2
-  exit 1
-fi
-
 aws cloudformation deploy \
   --template-file cloudformation-solution.yaml \
-  --stack-name customer-support-bedrock-stack \
+  --stack-name "$solution_stack_name" \
   --parameter-overrides \
-    "BugReportFunctionArn=$function_arn" \
     "ModelId=$model_id" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$deploy_region" \
@@ -55,6 +48,6 @@ aws cloudformation deploy \
 
 aws cloudformation describe-stacks \
   --region "$deploy_region" \
-  --stack-name customer-support-bedrock-stack \
+  --stack-name "$solution_stack_name" \
   --query 'Stacks[0].Outputs' \
   --output table
