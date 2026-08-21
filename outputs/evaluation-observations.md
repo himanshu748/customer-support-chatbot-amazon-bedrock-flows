@@ -19,4 +19,13 @@ Flow invocation errors: 0
 
 ## Judge result
 
-The JSONL dataset is uploaded and ready for the Amazon Bedrock LLM-as-a-judge job. Record the completed correctness score and results screenshot here after the console job finishes.
+The Amazon Bedrock LLM-as-a-judge job completed successfully using Amazon Nova Pro as the evaluator and `my-flow-app` as the precomputed inference source.
+
+- Metric: Correctness
+- Normalized average score: **1.00**
+- Prompts evaluated: 10
+- Job status: Completed
+- Failure messages: None
+- Evidence: [`12-evaluation-results.jpg`](evidence/12-evaluation-results.jpg)
+
+The perfect normalized score confirms that the generated responses matched the reference expectations across bug intake, FAQ answers, fallback behavior and routing edge cases.

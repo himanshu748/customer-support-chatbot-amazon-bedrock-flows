@@ -186,7 +186,7 @@ The script prints the traced node sequence for each prompt. It writes `output_ev
 
 Bug tests cover both missing-detail follow-up wording and complete report summaries. Every test is a single Flow invocation because the accepted Prompt-node replacement is stateless.
 
-The checked-in live run invoked all ten tests against Flow version 4 with zero Flow errors. The trace log confirms that each test reached the correct dedicated output node.
+The checked-in live run invoked all ten tests against Flow version 4 with zero Flow errors. The trace log confirms that each test reached the correct dedicated output node. Amazon Bedrock Evaluations then scored the ten responses at **1.00 Correctness** using Nova Pro as the LLM judge.
 
 ## 7. Run Bedrock Evaluations
 
@@ -270,6 +270,7 @@ The evidence below was captured from the deployed `us-east-1` resources. Images 
 | Other-request path | [Human redirect](outputs/evidence/10-other-request-input-answer.jpg) |
 | Persisted bug report | [DynamoDB ticket fields and steps](outputs/evidence/11b-dynamodb-ticket-steps.jpg) |
 | Automated test suite | [`flow-tests.json`](flow-tests.json), [generated JSONL](outputs/output_eval_dataset.jsonl), [live trace log](outputs/eval-run.log) |
+| Bedrock LLM-as-a-judge result | [Correctness 1.00 results page](outputs/evidence/12-evaluation-results.jpg) |
 | Written evaluation observation | [Evaluation observations](outputs/evaluation-observations.md) |
 
 ## Cleanup
