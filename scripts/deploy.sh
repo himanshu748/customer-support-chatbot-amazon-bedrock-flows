@@ -2,12 +2,13 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 [--model-id MODEL] [--solution-stack-name NAME]"
+  echo "Usage: $0 [--model-id MODEL] [--solution-stack-name NAME] [--deployment-revision REVISION]"
 }
 
 deploy_region="us-east-1"
 model_id="amazon.nova-lite-v1:0"
 solution_stack_name="customer-support-flow-stack"
+deployment_revision="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -17,6 +18,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --solution-stack-name)
       solution_stack_name="$2"
+      shift 2
+      ;;
+    --deployment-revision)
+      deployment_revision="$2"
       shift 2
       ;;
     -h|--help)
@@ -42,6 +47,7 @@ aws cloudformation deploy \
   --stack-name "$solution_stack_name" \
   --parameter-overrides \
     "ModelId=$model_id" \
+    "DeploymentRevision=$deployment_revision" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$deploy_region" \
   --no-fail-on-empty-changeset

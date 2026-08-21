@@ -7,4 +7,9 @@ work/*
 !work/.gitkeep
 outputs/*
 !outputs/.gitkeep
-output_eval_dataset.jsonl
+!outputs/evidence/
+!outputs/evidence/*.jpg
+!outputs/output_eval_dataset.jsonl
+!outputs/eval-run.log
+!outputs/evaluation-observations.md
+/output_eval_dataset.jsonl

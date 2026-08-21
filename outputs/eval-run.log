@@ -1,0 +1,19 @@
+Amazon Bedrock Flow automated evaluation dataset run
+Date: 2026-08-21
+Region: us-east-1
+Published Flow version: 4
+
+[1/10] t1_bug_report_missing_details: complete (FlowInput -> ClassifyRequest -> RouteRequest -> BugReportAssistant -> BugOutput)
+[2/10] t2_bug_report_complete: complete (FlowInput -> ClassifyRequest -> RouteRequest -> BugReportAssistant -> BugOutput)
+[3/10] t3_bug_payment_precedence: complete (FlowInput -> ClassifyRequest -> RouteRequest -> BugReportAssistant -> BugOutput)
+[4/10] t4_platform_track_order: complete (FlowInput -> ClassifyRequest -> RouteRequest -> AnswerFAQ -> FAQOutput)
+[5/10] t5_platform_return_window: complete (FlowInput -> ClassifyRequest -> RouteRequest -> AnswerFAQ -> FAQOutput)
+[6/10] t6_platform_account_closure: complete (FlowInput -> ClassifyRequest -> RouteRequest -> AnswerFAQ -> FAQOutput)
+[7/10] t7_platform_uncovered_gift_wrapping: complete (FlowInput -> ClassifyRequest -> RouteRequest -> AnswerFAQ -> FAQOutput)
+[8/10] t8_other_request: complete (FlowInput -> ClassifyRequest -> RouteRequest -> RedirectHuman -> HumanOutput)
+[9/10] t9_other_prompt_injection: complete (FlowInput -> ClassifyRequest -> RouteRequest -> RedirectHuman -> HumanOutput)
+[10/10] t10_platform_prompt_injection: complete (FlowInput -> ClassifyRequest -> RouteRequest -> AnswerFAQ -> FAQOutput)
+
+Wrote 10 records to outputs/output_eval_dataset.jsonl.
+Uploaded the dataset to the encrypted evaluation S3 bucket.
+Flow errors: 0

@@ -164,6 +164,8 @@ class CloudFormationTests(unittest.TestCase):
         self.assertIn("description", prompt_text.lower())
         self.assertIn("steps to reproduce", prompt_text.lower())
         self.assertIn("environment", prompt_text.lower())
+        self.assertIn("explicitly labels them as steps", prompt_text.lower())
+        self.assertIn("environment field as complete", prompt_text.lower())
         self.assertIn("Never claim that a database ticket", prompt_text)
         self.assertEqual(0, inline["InferenceConfiguration"]["Text"]["Temperature"])
 
@@ -187,12 +189,23 @@ class CloudFormationTests(unittest.TestCase):
         faq_text = faq_text["Text"]["Text"]
         self.assertIn("FAQ:", faq_text)
         self.assertIn("Track orders in Account > Orders > Track shipment", faq_text)
+        self.assertIn("packaging requirement", faq_text)
+        self.assertIn("account ownership before closing", faq_text)
         self.assertIn("${SupportPhone}", faq_text)
 
         redirect = nodes["RedirectHuman"]["Configuration"]["Prompt"]
         redirect_text = redirect["SourceConfiguration"]["Inline"]
         redirect_text = redirect_text["TemplateConfiguration"]["Text"]["Text"]
         self.assertIn("${SupportPhone}", redirect_text)
+
+    def test_flow_version_rotates_when_deployment_revision_changes(self):
+        template = load_template("cloudformation-solution.yaml")
+        parameters = template["Parameters"]
+        version = template["Resources"]["CustomerSupportFlowVersion"]
+        description = version["Properties"]["Description"]
+
+        self.assertIn("DeploymentRevision", parameters)
+        self.assertIn("${DeploymentRevision}", description)
 
     def test_flow_tests_cover_all_routes_and_uncovered_faq(self):
         suite = json.loads((PROJECT_ROOT / "flow-tests.json").read_text(encoding="utf-8"))
