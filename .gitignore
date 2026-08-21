@@ -9,7 +9,10 @@ outputs/*
 !outputs/.gitkeep
 !outputs/evidence/
 !outputs/evidence/*.jpg
+!outputs/evidence/*.png
+!outputs/evidence/live-evidence.html
 !outputs/output_eval_dataset.jsonl
 !outputs/eval-run.log
 !outputs/evaluation-observations.md
+!outputs/live-flow-verification.md
 /output_eval_dataset.jsonl

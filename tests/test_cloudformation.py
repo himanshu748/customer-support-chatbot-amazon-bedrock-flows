@@ -96,6 +96,95 @@ class CloudFormationTests(unittest.TestCase):
         self.assertEqual(1, len(table.items))
         self.assertEqual("Checkout freezes", table.items[0]["description"])
 
+    def test_deployed_inline_lambda_accepts_flow_node_event(self):
+        template = load_template("cloudformation-tool.yaml")
+        source = template["Resources"]["BugReportFunction"]["Properties"]["Code"]
+        source = source["ZipFile"]
+
+        class FakeTable:
+            def __init__(self):
+                self.items = []
+
+            def put_item(self, **kwargs):
+                self.items.append(kwargs["Item"])
+
+        table = FakeTable()
+        boto3_module = types.ModuleType("boto3")
+        boto3_module.resource = lambda service: types.SimpleNamespace(
+            Table=lambda name: table
+        )
+        namespace = {}
+        with patch.dict(sys.modules, {"boto3": boto3_module}), patch.dict(
+            os.environ, {"BUG_REPORT_TABLE": "BugReports"}
+        ):
+            exec(compile(source, "cloudformation-tool.yaml:ZipFile", "exec"), namespace)
+
+        response = namespace["lambda_handler"](
+            {
+                "messageVersion": "1.0",
+                "flow": {"flowArn": "arn:aws:bedrock:us-east-1:123:flow/test"},
+                "node": {
+                    "name": "CreateBugReport",
+                    "inputs": [
+                        {
+                            "name": "bugReport",
+                            "value": json.dumps(
+                                {
+                                    "status": "READY",
+                                    "description": "Checkout freezes",
+                                    "stepsToReproduce": "Open checkout, press Continue",
+                                    "environment": "Chrome on macOS",
+                                }
+                            ),
+                        }
+                    ],
+                },
+            },
+            None,
+        )
+
+        self.assertEqual(1, len(table.items))
+        self.assertIn(table.items[0]["ticketId"], response)
+        self.assertEqual("BEDROCK_FLOW", table.items[0]["source"])
+
+    def test_deployed_inline_lambda_reprompts_for_overlong_agent_input(self):
+        template = load_template("cloudformation-tool.yaml")
+        source = template["Resources"]["BugReportFunction"]["Properties"]["Code"]
+        source = source["ZipFile"]
+
+        class FakeTable:
+            def __init__(self):
+                self.items = []
+
+            def put_item(self, **kwargs):
+                self.items.append(kwargs["Item"])
+
+        table = FakeTable()
+        boto3_module = types.ModuleType("boto3")
+        boto3_module.resource = lambda service: types.SimpleNamespace(
+            Table=lambda name: table
+        )
+        namespace = {}
+        with patch.dict(sys.modules, {"boto3": boto3_module}), patch.dict(
+            os.environ, {"BUG_REPORT_TABLE": "BugReports"}
+        ):
+            exec(compile(source, "cloudformation-tool.yaml:ZipFile", "exec"), namespace)
+
+        response = namespace["lambda_handler"](
+            {
+                "messageVersion": "1.0",
+                "function": "create_bug_report",
+                "parameters": [
+                    {"name": "description", "value": "x" * 4001},
+                ],
+            },
+            None,
+        )
+
+        function_response = response["response"]["functionResponse"]
+        self.assertEqual("REPROMPT", function_response["responseState"])
+        self.assertEqual([], table.items)
+
     def test_flow_has_three_exact_route_conditions_and_outputs(self):
         template = load_template("cloudformation-solution.yaml")
         definition = template["Resources"]["CustomerSupportFlow"]["Properties"]
@@ -153,7 +242,7 @@ class CloudFormationTests(unittest.TestCase):
             conditional_targets,
         )
 
-    def test_bug_prompt_collects_required_fields_without_claiming_a_ticket(self):
+    def test_bug_prompt_collects_required_fields_for_flow_lambda(self):
         template = load_template("cloudformation-solution.yaml")
         definition = template["Resources"]["CustomerSupportFlow"]["Properties"]
         nodes = {node["Name"]: node for node in definition["Definition"]["Nodes"]}
@@ -166,11 +255,48 @@ class CloudFormationTests(unittest.TestCase):
         self.assertIn("environment", prompt_text.lower())
         self.assertIn("explicitly labels them as steps", prompt_text.lower())
         self.assertIn("environment field as complete", prompt_text.lower())
-        self.assertIn("Never claim that a database ticket", prompt_text)
+        self.assertIn('"status":"READY"', prompt_text)
+        self.assertIn('"status":"NEEDS_INFO"', prompt_text)
         self.assertEqual(0, inline["InferenceConfiguration"]["Text"]["Temperature"])
 
         self.assertNotIn("BugReportAgent", template["Resources"])
         self.assertNotIn("BugReportAgentAlias", template["Resources"])
+
+    def test_bug_path_invokes_lambda_before_bug_output(self):
+        template = load_template("cloudformation-solution.yaml")
+        flow = template["Resources"]["CustomerSupportFlow"]["Properties"]
+        definition = flow["Definition"]
+        nodes = {node["Name"]: node for node in definition["Nodes"]}
+        connections = {item["Name"]: item for item in definition["Connections"]}
+
+        lambda_node = nodes["CreateBugReport"]
+        self.assertEqual("LambdaFunction", lambda_node["Type"])
+        self.assertEqual(
+            [{"Name": "functionResponse", "Type": "String"}],
+            lambda_node["Outputs"],
+        )
+        self.assertEqual(
+            "BugReportAssistant",
+            connections["BugPromptToLambda"]["Source"],
+        )
+        self.assertEqual(
+            "CreateBugReport",
+            connections["BugPromptToLambda"]["Target"],
+        )
+        self.assertEqual(
+            "BugOutput",
+            connections["LambdaToBugOutput"]["Target"],
+        )
+        self.assertNotIn("BugToOutput", connections)
+
+        policy = template["Resources"]["FlowExecutionRole"]["Properties"]
+        statements = policy["Policies"][0]["PolicyDocument"]["Statement"]
+        invoke = next(
+            statement
+            for statement in statements
+            if "lambda:InvokeFunction" in statement.get("Action", [])
+        )
+        self.assertIn("create-bug-report", invoke["Resource"])
 
     def test_classifier_and_faq_prompts_match_rubric_contract(self):
         template = load_template("cloudformation-solution.yaml")

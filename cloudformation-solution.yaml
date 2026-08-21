@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Routed Amazon Bedrock customer support Flow with prompt-based handlers
+Description: Routed Amazon Bedrock customer support Flow with Lambda-backed bug tickets
 
 Parameters:
   ModelId:
@@ -12,7 +12,7 @@ Parameters:
     Description: Human support phone line shown to customers
   DeploymentRevision:
     Type: String
-    Default: 2026-08-21-r4
+    Default: 2026-08-21-r5
     Description: Change this value to publish a new Flow version after prompt updates
 
 Resources:
@@ -45,6 +45,11 @@ Resources:
                   - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/*
                   - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*
                   - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*
+              - Sid: InvokeBugReportFunction
+                Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:create-bug-report
 
   CustomerSupportFlow:
     Type: AWS::Bedrock::Flow
@@ -156,12 +161,18 @@ Resources:
                           least one browser, operating system or device detail. Do not ask for
                           additional environment subfields when any one of those details is present.
 
-                          If the message is missing useful details, acknowledge the reported bug
-                          and ask one concise follow-up question that names the missing fields. If
-                          all three fields are present, summarize them under Description, Steps to
-                          reproduce and Environment, then state that the report is ready for the
-                          support team to file. Never claim that a database ticket, ticket ID or
-                          Lambda invocation exists. Do not answer platform policy questions here.
+                          Output only one valid JSON object on one line with no Markdown fences,
+                          commentary or extra keys.
+
+                          If any field is missing, use this shape and make message a concise,
+                          customer-facing follow-up that names every missing field:
+                          {"status":"NEEDS_INFO","message":"..."}
+
+                          If all three fields are present, use this shape:
+                          {"status":"READY","description":"...","stepsToReproduce":"...","environment":"..."}
+
+                          Preserve the customer's facts, escape JSON special characters and do not
+                          invent details. Do not answer platform policy questions here.
 
                           <bug_report>
                           {{report}}
@@ -177,6 +188,19 @@ Resources:
                 Expression: $.data
             Outputs:
               - Name: modelCompletion
+                Type: String
+
+          - Name: CreateBugReport
+            Type: LambdaFunction
+            Configuration:
+              LambdaFunction:
+                LambdaArn: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:create-bug-report
+            Inputs:
+              - Name: bugReport
+                Type: String
+                Expression: $.data
+            Outputs:
+              - Name: functionResponse
                 Type: String
 
           - Name: AnswerFAQ
@@ -394,13 +418,21 @@ Resources:
             Configuration:
               Conditional:
                 Condition: default
-          - Name: BugToOutput
+          - Name: BugPromptToLambda
             Source: BugReportAssistant
-            Target: BugOutput
+            Target: CreateBugReport
             Type: Data
             Configuration:
               Data:
                 SourceOutput: modelCompletion
+                TargetInput: bugReport
+          - Name: LambdaToBugOutput
+            Source: CreateBugReport
+            Target: BugOutput
+            Type: Data
+            Configuration:
+              Data:
+                SourceOutput: functionResponse
                 TargetInput: document
           - Name: FAQToOutput
             Source: AnswerFAQ
